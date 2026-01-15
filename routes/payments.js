@@ -74,7 +74,7 @@ router.post("/callback", async (req, res) => {
 
     if (Response === "000") {
       // SUCCESS
-      order.status = "paid";
+      
 
 
       // reduce stock

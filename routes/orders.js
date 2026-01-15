@@ -143,6 +143,46 @@ router.post("/checkout", auth, async (req, res) => {
   }
 });
 
+
+// CANCEL ORDER (only within 2 hours, only if pending)
+router.patch("/:id/cancel", auth, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const order = await Order.findById(orderId).exec();
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    // must belong to current user
+    if (order.user.toString() !== req.userId) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    // only pending orders can be canceled
+    if (order.status !== "pending") {
+      return res.status(400).json({ message: "Only pending orders can be canceled" });
+    }
+
+    // 2 hours rule (server time)
+    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+    const createdAt = new Date(order.createdAt).getTime();
+    const now = Date.now();
+
+    if (now - createdAt > TWO_HOURS_MS) {
+      return res.status(400).json({ message: "Cancellation window expired (2 hours)" });
+    }
+
+    order.status = "canceled";
+    await order.save();
+
+    return res.json({ message: "Order canceled", order: orderToDTO(order) });
+  } catch (err) {
+    console.error("CANCEL ORDER ERROR:", err);
+    return res.status(500).json({ message: "server error" });
+  }
+});
+
+
+
 // GET /api/orders/my  – get current user's orders
 router.get("/my", auth, async (req, res) => {
   try {
