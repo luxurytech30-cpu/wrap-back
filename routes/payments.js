@@ -99,7 +99,52 @@ router.post("/start", auth, async (req, res) => {
     return res.status(500).json({ message: "server error" });
   }
 });
+function returnHtml({ ok, orderId, clientUrl }) {
+  const target = ok
+    ? `${clientUrl}/payment-success?orderId=${encodeURIComponent(orderId || "")}`
+    : `${clientUrl}/payment-failed?orderId=${encodeURIComponent(orderId || "")}`;
 
+  return `<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${ok ? "Payment Success" : "Payment Failed"}</title>
+</head>
+<body style="font-family: Arial; padding: 20px; text-align:center;">
+  <h3>${ok ? "התשלום אושר ✅" : "התשלום נכשל ❌"}</h3>
+  <p>מעבירים אותך...</p>
+
+  <script>
+    (function () {
+      var url = ${JSON.stringify(target)};
+
+      // If it opened as a popup window, redirect opener
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.location.href = url;
+        }
+      } catch(e) {}
+
+      // If inside iframe, redirect the top page
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = url;
+        }
+      } catch(e) {}
+
+      // Always redirect this window too (fallback)
+      try { window.location.href = url; } catch(e) {}
+
+      // Try closing popup (works if the window was opened by JS)
+      setTimeout(function () {
+        try { window.close(); } catch(e) {}
+      }, 400);
+    })();
+  </script>
+</body>
+</html>`;
+}
 /**
  * RETURN SUCCESS (browser redirect from Tranzila)
  * Tranzila may send query or body. We accept both.
@@ -107,31 +152,28 @@ router.post("/start", auth, async (req, res) => {
  */
 router.all("/return/success", urlencoded, async (req, res) => {
   const payload = { ...(req.query || {}), ...(req.body || {}) };
-  const orderId =
-    payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+  const orderId = payload.orderid || payload.myorder || payload.orderId || "";
 
-  const to = new URL(`${CLIENT_URL}/payment-success`);
-  if (orderId) to.searchParams.set("orderId", String(orderId));
-
-  console.log("🔁 [Return SUCCESS] →", to.toString(), "payload:", payload);
-  return res.redirect(302, to.toString());
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(200).send(returnHtml({
+    ok: true,
+    orderId,
+    clientUrl: CLIENT_URL, // https://www.perfectwrap2021.com
+  }));
 });
 
-/**
- * RETURN FAIL (browser redirect from Tranzila)
- * redirect to FRONTEND /payment-failed?orderId=...
- */
 router.all("/return/fail", urlencoded, async (req, res) => {
   const payload = { ...(req.query || {}), ...(req.body || {}) };
-  const orderId =
-    payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+  const orderId = payload.orderid || payload.myorder || payload.orderId || "";
 
-  const to = new URL(`${CLIENT_URL}/payment-failed`);
-  if (orderId) to.searchParams.set("orderId", String(orderId));
-
-  console.log("🔁 [Return FAIL] →", to.toString(), "payload:", payload);
-  return res.redirect(302, to.toString());
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.status(200).send(returnHtml({
+    ok: false,
+    orderId,
+    clientUrl: CLIENT_URL,
+  }));
 });
+
 
 /**
  * IPN (server-to-server notify from Tranzila)
