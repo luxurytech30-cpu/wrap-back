@@ -114,29 +114,27 @@ router.post("/checkout", auth, async (req, res) => {
     
 
     const order = await Order.create({
-      user: user._id,
-      customerDetails: {
-        fullName,
-        phone,
-        email: email || "",
-        city,
-        street,
-        houseNumber,
-        postalCode: postalCode || "",
-        notes: notes || "",
-      },
-      items: orderItems,
-      totalWithoutMaam,
-      
-      status: "pending",
-    });
+  user: user._id,
+  customerDetails: {
+    fullName,
+    phone,
+    email: email || "",
+    city,
+    street,
+    houseNumber,
+    postalCode: postalCode || "",
+    notes: notes || "",
+  },
+  items: orderItems,
+  totalWithoutMaam,
+  status: "pending",
+});
 
-    // clear cart
-    user.cart = [];
-    await user.save();
+// ✅ DO NOT clear cart here (wait for payment success callback)
 
-    const dto = orderToDTO(order);
-    return res.json({ message: "Order created (pending payment)", order: dto });
+const dto = orderToDTO(order);
+return res.json({ message: "Order created (pending payment)", order: dto });
+
   } catch (err) {
     console.error("CHECKOUT ERROR:", err);
     return res.status(500).json({ message: "server error" });
