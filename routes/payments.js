@@ -1,90 +1,96 @@
 // routes/payments.js
+require("dotenv").config();
+
 const express = require("express");
 const router = express.Router();
+
 const auth = require("../middleware/auth");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const User = require("../models/User");
 
+// IMPORTANT: Tranzila sends urlencoded body
+const urlencoded = express.urlencoded({ extended: true });
+
+// URLs
 const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:8080";
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
 
+// Tranzila
 const TRANZILA_SUPPLIER = process.env.TRANZILA_SUPPLIER || "tranzilatst";
-const TRANZILA_LANG = process.env.TRANZILA_LANG || "he";
-const TRANZILA_CURRENCY = process.env.TRANZILA_CURRENCY || "1";
-const TRANZILA_DIRECT_MODE = process.env.TRANZILA_DIRECT_MODE || "iframe"; // iframe | iframenew
+const TRANZILA_LANG = process.env.TRANZILA_LANG || "il"; // ✅ il (not he)
+const TRANZILA_CURRENCY = process.env.TRANZILA_CURRENCY || "1"; // 1=ILS
 
-const urlencoded = express.urlencoded({ extended: true });
-
-function money2(n) {
-  return Number(n || 0).toFixed(2);
+function toFixed2(n) {
+  const num = Number(n || 0);
+  return num.toFixed(2);
 }
 
-function getDirectBaseUrl(supplier) {
-  const safe = encodeURIComponent(supplier);
-  if (TRANZILA_DIRECT_MODE === "iframenew") {
-    return `https://direct.tranzila.com/${safe}/iframenew.php`;
-  }
-  return `https://direct.tranzila.com/${safe}/iframe.php`;
+// Build Tranzila iframenew URL (the one you tested manually)
+function buildIframeNewUrl({ order, customer = {} }) {
+  const base = `https://direct.tranzila.com/${encodeURIComponent(
+    TRANZILA_SUPPLIER
+  )}/iframenew.php`;
+
+  // These are BACKEND endpoints (Tranzila returns to your backend, then you redirect to frontend)
+  const success_url_address = `${BACKEND_URL}/api/payments/return/success`;
+  const fail_url_address = `${BACKEND_URL}/api/payments/return/fail`;
+  const notify_url_address = `${BACKEND_URL}/api/payments/ipn/tranzila`;
+
+  const params = new URLSearchParams({
+    supplier: TRANZILA_SUPPLIER,
+    sum: toFixed2(order.totalWithoutMaam),
+    currency: String(TRANZILA_CURRENCY),
+    orderid: String(order._id),
+
+    // Return + IPN
+    success_url_address,
+    fail_url_address,
+    notify_url_address,
+
+    // Optional customer fields (good for receipts/CRM at Tranzila)
+    company: customer.company || "",
+    contact: customer.contact || order.customerDetails?.fullName || "",
+    email: customer.email || order.customerDetails?.email || "",
+    phone: customer.phone || order.customerDetails?.phone || "",
+    address: customer.address || `${order.customerDetails?.street || ""} ${order.customerDetails?.houseNumber || ""}`.trim(),
+    city: customer.city || order.customerDetails?.city || "",
+    zip: customer.zip || order.customerDetails?.postalCode || "",
+    remarks: customer.remarks || "",
+    pdesc: customer.pdesc || "PerfectWrap Order",
+    myid: customer.myid || "",
+
+    // ✅ language that works
+    lang: TRANZILA_LANG,
+
+    // Regular transaction
+    cred_type: "1",
+  });
+
+  return `${base}?${params.toString()}`;
 }
 
 /**
  * POST /api/payments/start
- * body: { orderId, supplier? }  // supplier optional: "ahlam" or "ahlamtok"
+ * body: { orderId }
  * returns: { iframeUrl }
  */
 router.post("/start", auth, async (req, res) => {
   try {
-    const { orderId, supplier } = req.body;
+    const { orderId } = req.body;
     if (!orderId) return res.status(400).json({ message: "orderId is required" });
 
     const order = await Order.findOne({ _id: orderId, user: req.userId }).exec();
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    if (order.status !== "pending_payment") {
-      return res.status(400).json({ message: "Order is not pending payment" });
+    if (order.status && order.status !== "pending") {
+      return res.status(400).json({ message: "Order is not pending" });
     }
 
-    const sum = money2(order.totalWithoutMaam);
+    const iframeUrl = buildIframeNewUrl({ order });
 
-    // Return URLs (browser redirect)
-    const successReturn = `${BACKEND_URL}/api/payments/return/success?orderId=${order._id}`;
-    const failReturn = `${BACKEND_URL}/api/payments/return/fail?orderId=${order._id}`;
-
-    // IPN server-to-server callback
-    const notifyUrl = `${BACKEND_URL}/api/payments/ipn/tranzila`;
-
-    const usedSupplier = (supplier || TRANZILA_SUPPLIER).trim();
-    const base = getDirectBaseUrl(usedSupplier);
-
-    // IMPORTANT: direct.tranzila uses these param names:
-    // success_url_address / fail_url_address / notify_url_address
-    const params = new URLSearchParams({
-      sum,
-      currency: String(TRANZILA_CURRENCY),
-      orderid: String(order._id),
-      lang: TRANZILA_LANG,
-      success_url_address: successReturn,
-      fail_url_address: failReturn,
-      notify_url_address: notifyUrl,
-
-      // Optional customer details (nice to have in Tranzila UI)
-      contact: order.customerDetails?.fullName || "",
-      email: order.customerDetails?.email || "",
-      phone: order.customerDetails?.phone || "",
-      city: order.customerDetails?.city || "",
-      address: `${order.customerDetails?.street || ""} ${order.customerDetails?.houseNumber || ""}`.trim(),
-      remarks: order.customerDetails?.notes || "",
-      pdesc: "PerfectWrap Order",
-    });
-
-    // Single payment
-    params.set("cred_type", "1");
-
-    const iframeUrl = `${base}?${params.toString()}`;
-
-    // (optional) store startedAt
-    // order.payment = { startedAt: new Date(), supplier: usedSupplier };
+    // Optional: store for debugging
+    // order.paymentMeta = { iframeUrl, startedAt: new Date().toISOString() };
     // await order.save();
 
     return res.json({ iframeUrl });
@@ -95,53 +101,68 @@ router.post("/start", auth, async (req, res) => {
 });
 
 /**
- * Return URLs - redirect back to frontend
- * Tranzila will send user here after payment
+ * RETURN SUCCESS (browser redirect from Tranzila)
+ * Tranzila may send query or body. We accept both.
+ * We redirect to FRONTEND /payment-success?orderId=...
  */
 router.all("/return/success", urlencoded, async (req, res) => {
-  const orderId = req.query.orderId || req.body?.orderId;
+  const payload = { ...(req.query || {}), ...(req.body || {}) };
+  const orderId =
+    payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+
   const to = new URL(`${CLIENT_URL}/payment-success`);
   if (orderId) to.searchParams.set("orderId", String(orderId));
-  return res.redirect(302, to.toString());
-});
 
-router.all("/return/fail", urlencoded, async (req, res) => {
-  const orderId = req.query.orderId || req.body?.orderId;
-  const to = new URL(`${CLIENT_URL}/payment-failed`);
-  if (orderId) to.searchParams.set("orderId", String(orderId));
+  console.log("🔁 [Return SUCCESS] →", to.toString(), "payload:", payload);
   return res.redirect(302, to.toString());
 });
 
 /**
- * IPN callback (server-to-server)
- * Accept GET or POST
- * Tranzila commonly sends Response=000 when approved
+ * RETURN FAIL (browser redirect from Tranzila)
+ * redirect to FRONTEND /payment-failed?orderId=...
+ */
+router.all("/return/fail", urlencoded, async (req, res) => {
+  const payload = { ...(req.query || {}), ...(req.body || {}) };
+  const orderId =
+    payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+
+  const to = new URL(`${CLIENT_URL}/payment-failed`);
+  if (orderId) to.searchParams.set("orderId", String(orderId));
+
+  console.log("🔁 [Return FAIL] →", to.toString(), "payload:", payload);
+  return res.redirect(302, to.toString());
+});
+
+/**
+ * IPN (server-to-server notify from Tranzila)
+ * Very important: must respond quickly with 200 OK.
+ * We update order paid/failed and reduce stock ONCE (idempotent).
  */
 router.all("/ipn/tranzila", urlencoded, async (req, res) => {
   try {
     const payload = { ...(req.query || {}), ...(req.body || {}) };
 
-    const orderid = payload.orderid || payload.myorder || payload.OrderId;
-    const Response = String(payload.Response || payload.response || "").trim();
-    const Tempref = payload.Tempref || payload.tempref || "";
+    const orderId =
+      payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
 
-    if (!orderid) return res.status(200).send("OK");
+    // Tranzila "Response" often: "000" or "0" = approved
+    const Response = payload.Response || payload.response || payload.RESPONSE;
+    const approved =
+      String(Response || "").trim() === "000" || String(Response || "").trim() === "0";
 
-    const order = await Order.findById(orderid).exec();
+    console.log("📥 [IPN] payload:", payload);
+    console.table({ orderId, Response, approved });
+
+    if (!orderId) return res.status(200).send("OK");
+
+    const order = await Order.findById(orderId).exec();
     if (!order) return res.status(200).send("OK");
 
-    // idempotent
+    // ✅ Idempotency: if already paid, don't reduce stock again
     if (order.status === "paid") return res.status(200).send("OK");
 
-    const approved = Response === "000" || Response === "0";
-
-    // store gateway payload (optional)
-    order.tranzila = {
-      response: Response,
-      tempref: Tempref,
-      payload,
-      at: new Date(),
-    };
+    // Save raw payload for debugging (optional field in schema)
+    order.tranzilaPayload = payload;
 
     if (!approved) {
       order.status = "failed";
@@ -151,21 +172,25 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
 
     // SUCCESS
     order.status = "paid";
-    order.paidAt = new Date();
 
     // Reduce stock
     for (const item of order.items) {
-      const product = await Product.findById(item.product).exec();
+      const productId = item.product; // in your schema it's item.product (ObjectId)
+      const product = await Product.findById(productId).exec();
       if (!product) continue;
 
       const option = product.options?.[item.optionIndex];
       if (!option) continue;
 
-      option.stock = Math.max(Number(option.stock || 0) - Number(item.quantity || 0), 0);
+      option.stock = Math.max(
+        Number(option.stock || 0) - Number(item.quantity || 0),
+        0
+      );
+
       await product.save();
     }
 
-    // Clear user's cart only now (after payment)
+    // OPTIONAL: clear cart after payment (recommended)
     const user = await User.findById(order.user).exec();
     if (user) {
       user.cart = [];
@@ -175,8 +200,8 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
     await order.save();
     return res.status(200).send("OK");
   } catch (err) {
-    console.error("IPN ERROR:", err);
-    return res.status(200).send("OK"); // IPN should respond OK even on error to prevent retries storms
+    console.error("❌ [IPN] error:", err);
+    return res.status(200).send("OK"); // always 200 so Tranzila doesn't retry forever
   }
 });
 
