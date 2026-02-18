@@ -40,17 +40,19 @@ function orderToDTO(order) {
   return {
     id: order._id.toString(),
     date: order.createdAt.toISOString(),
-    items: order.items.map((item) => ({
-      productId: item.product.toString(),
-      productName: item.productName,
-      optionName: item.optionName,
-      optionIndex: item.optionIndex,
-      priceWithoutMaam: item.priceWithoutMaam,
-      quantity: item.quantity,
-      image: item.image,
-      itemNote: item.itemNote || "",
+ items: order.items.map((item) => ({
+  productId: item.product.toString(),
+  productName: item.productName,
+  optionName: item.optionName,
+  optionIndex: item.optionIndex,
+  priceWithoutMaam: item.priceWithoutMaam,
+  quantity: item.quantity,
+  image: item.image,
+  itemNote: item.itemNote || "",
+      itemImageUrl: item.itemImageUrl || "",
+      itemImagePublicId: item.itemImagePublicId || "",
+})),
 
-    })),
     totalWithoutMaam: order.totalWithoutMaam,
     
     status: order.status,
@@ -71,6 +73,7 @@ router.post("/checkout", auth, async (req, res) => {
       houseNumber,
       postalCode,
       notes,
+      itemsMeta = [], // ✅ NEW
     } = req.body;
 
     if (!fullName || !phone || !city || !street || !houseNumber) {
@@ -79,7 +82,6 @@ router.post("/checkout", auth, async (req, res) => {
       });
     }
 
-    // load user + cart
     const user = await User.findById(req.userId).populate("cart.product");
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -87,7 +89,7 @@ router.post("/checkout", auth, async (req, res) => {
       return res.status(400).json({ message: "העגלה ריקה" });
     }
 
-    // validate stock (soft check – you can also deduct later after payment)
+    // validate stock
     for (const cartItem of user.cart) {
       const product = cartItem.product;
       const option = product.options[cartItem.optionIndex];
@@ -105,41 +107,64 @@ router.post("/checkout", auth, async (req, res) => {
       }
     }
 
-    const orderItems = user.cart.map(mapCartItemToOrderItem);
+    // Build quick lookup for meta by productId+optionIndex
+    const metaMap = new Map();
+    for (const m of itemsMeta) {
+      if (!m?.productId && m?.productId !== 0) continue;
+      const k = `${String(m.productId)}-${Number(m.optionIndex)}`;
+     metaMap.set(k, {
+  note: (m.note || "").trim(),
+  imageUrl: (m.imageUrl || "").trim(),
+  publicId: (m.publicId || "").trim(),
+});
+
+    }
+
+    // Map cart -> order items + attach meta
+    const orderItems = user.cart.map((cartItem) => {
+      const base = mapCartItemToOrderItem(cartItem); // your existing mapper
+      const k = `${String(cartItem.product._id)}-${Number(cartItem.optionIndex)}`;
+      const meta = metaMap.get(k);
+
+     return {
+  ...base,
+  itemNote: meta?.note ?? base.itemNote ?? "",
+  itemImageUrl: meta?.imageUrl ?? "",
+  itemImagePublicId: meta?.publicId ?? "",
+};
+
+    });
 
     const totalWithoutMaam = orderItems.reduce(
       (sum, item) => sum + item.priceWithoutMaam * item.quantity,
       0
     );
-    
 
     const order = await Order.create({
-  user: user._id,
-  customerDetails: {
-    fullName,
-    phone,
-    email: email || "",
-    city,
-    street,
-    houseNumber,
-    postalCode: postalCode || "",
-    notes: notes || "",
-  },
-  items: orderItems,
-  totalWithoutMaam,
-  status: "pending",
-});
-
-// ✅ DO NOT clear cart here (wait for payment success callback)
-
-const dto = orderToDTO(order);
-return res.json({ message: "Order created (pending payment)", order: dto });
-
+      user: user._id,
+      customerDetails: {
+        fullName,
+        phone,
+        email: email || "",
+        city,
+        street,
+        houseNumber,
+        postalCode: postalCode || "",
+        notes: notes || "",
+      },
+      items: orderItems,
+      totalWithoutMaam,
+      status: "pending",
+    });
+console.log("ITEMS META FROM CLIENT:", itemsMeta);
+    const dto = orderToDTO(order);
+    return res.json({ message: "Order created (pending payment)", order: dto });
   } catch (err) {
     console.error("CHECKOUT ERROR:", err);
     return res.status(500).json({ message: "server error" });
   }
 });
+
 
 
 // CANCEL ORDER (only within 2 hours, only if pending)

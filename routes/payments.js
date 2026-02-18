@@ -150,6 +150,33 @@ function returnHtml({ ok, orderId, clientUrl }) {
  * Tranzila may send query or body. We accept both.
  * We redirect to FRONTEND /payment-success?orderId=...
  */
+// router.all("/return/success", urlencoded, async (req, res) => {
+//   const payload = { ...(req.query || {}), ...(req.body || {}) };
+//   const orderId =
+//     payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+
+//   const to = new URL(`${CLIENT_URL}/payment-success`);
+//   if (orderId) to.searchParams.set("orderId", String(orderId));
+
+//   console.log("🔁 [Return SUCCESS] →", to.toString(), "payload:", payload);
+//   return res.redirect(302, to.toString());
+// });
+
+// /**
+//  * RETURN FAIL (browser redirect from Tranzila)
+//  * redirect to FRONTEND /payment-failed?orderId=...
+//  */
+// router.all("/return/fail", urlencoded, async (req, res) => {
+//   const payload = { ...(req.query || {}), ...(req.body || {}) };
+//   const orderId =
+//     payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
+
+//   const to = new URL(`${CLIENT_URL}/payment-failed`);
+//   if (orderId) to.searchParams.set("orderId", String(orderId));
+
+//   console.log("🔁 [Return FAIL] →", to.toString(), "payload:", payload);
+//   return res.redirect(302, to.toString());
+// });
 router.all("/return/success", urlencoded, async (req, res) => {
   const payload = { ...(req.query || {}), ...(req.body || {}) };
   const orderId = payload.orderid || payload.myorder || payload.orderId || "";
@@ -173,7 +200,6 @@ router.all("/return/fail", urlencoded, async (req, res) => {
     clientUrl: CLIENT_URL,
   }));
 });
-
 
 /**
  * IPN (server-to-server notify from Tranzila)

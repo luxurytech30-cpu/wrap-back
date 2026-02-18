@@ -5,12 +5,12 @@ const auth = require("../middleware/auth");
 const admin = require("../middleware/admin");
 
 const router = express.Router();
+console.log("✅ upload routes loaded");
 
-router.post("/signature", auth, admin, (req, res) => {
+// src/routes/upload.js
+router.post("/signature/cart", auth, (req, res) => {
   const timestamp = Math.round(Date.now() / 1000);
-
-  
-  const folder = "perfect rab";
+  const folder = "perfect-rab/cart-items"; // תעשה שם בלי רווחים
 
   const paramsToSign = { timestamp, folder };
 
@@ -27,5 +27,7 @@ router.post("/signature", auth, admin, (req, res) => {
     folder,
   });
 });
+
+
 
 module.exports = router;

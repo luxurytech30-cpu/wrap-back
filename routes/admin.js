@@ -206,7 +206,6 @@ router.patch("/users/:id/role", async (req, res) => {
 
 router.get("/orders", async (req, res) => {
   try {
-    // exclude failed orders (supports different spellings / languages)
     const orders = await Order.find({
       status: { $nin: ["failed"] },
     }).sort({ createdAt: -1 });
@@ -222,13 +221,16 @@ router.get("/orders", async (req, res) => {
         priceWithoutMaam: it.priceWithoutMaam,
         quantity: it.quantity,
         image: it.image,
-        itemNote: it.itemNote
+        itemNote: it.itemNote,
+
+        // ✅ ADD THESE:
+        itemImageUrl: it.itemImageUrl || "",
+        itemImagePublicId: it.itemImagePublicId || "",
       })),
       totalWithoutMaam: o.totalWithoutMaam,
       totalWithMaam: o.totalWithMaam,
       status: o.status,
       customerDetails: o.customerDetails || undefined,
-
     }));
 
     return res.json(mapped);
@@ -237,6 +239,7 @@ router.get("/orders", async (req, res) => {
     return res.status(500).json({ message: "Failed to load orders" });
   }
 });
+
 
 
 module.exports = router;
