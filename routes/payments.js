@@ -26,44 +26,46 @@ function toFixed2(n) {
   return num.toFixed(2);
 }
 
-// Build Tranzila iframenew URL (the one you tested manually)
+// Build Tranzila iframenew URL
 function buildIframeNewUrl({ order, customer = {} }) {
   const base = `https://direct.tranzila.com/${encodeURIComponent(
     TRANZILA_SUPPLIER
   )}/iframenew.php`;
 
-  // These are BACKEND endpoints (Tranzila returns to your backend, then you redirect to frontend)
   const success_url_address = `${BACKEND_URL}/api/payments/return/success`;
   const fail_url_address = `${BACKEND_URL}/api/payments/return/fail`;
   const notify_url_address = `${BACKEND_URL}/api/payments/ipn/tranzila`;
 
+  // ✅ NEW: charge includes shipping fee
+  const sumToCharge =
+    order.totalToPay != null
+      ? order.totalToPay
+      : (Number(order.totalWithoutMaam || 0) + Number(order.shippingFee || 0));
+
   const params = new URLSearchParams({
     supplier: TRANZILA_SUPPLIER,
-    sum: toFixed2(order.totalWithoutMaam),
+    sum: toFixed2(sumToCharge),
     currency: String(TRANZILA_CURRENCY),
     orderid: String(order._id),
 
-    // Return + IPN
     success_url_address,
     fail_url_address,
     notify_url_address,
 
-    // Optional customer fields (good for receipts/CRM at Tranzila)
     company: customer.company || "",
     contact: customer.contact || order.customerDetails?.fullName || "",
     email: customer.email || order.customerDetails?.email || "",
     phone: customer.phone || order.customerDetails?.phone || "",
-    address: customer.address || `${order.customerDetails?.street || ""} ${order.customerDetails?.houseNumber || ""}`.trim(),
+    address:
+      customer.address ||
+      `${order.customerDetails?.street || ""} ${order.customerDetails?.houseNumber || ""}`.trim(),
     city: customer.city || order.customerDetails?.city || "",
     zip: customer.zip || order.customerDetails?.postalCode || "",
     remarks: customer.remarks || "",
     pdesc: customer.pdesc || "PerfectWrap Order",
     myid: customer.myid || "",
 
-    // ✅ language that works
     lang: TRANZILA_LANG,
-
-    // Regular transaction
     cred_type: "1",
   });
 
@@ -88,17 +90,13 @@ router.post("/start", auth, async (req, res) => {
     }
 
     const iframeUrl = buildIframeNewUrl({ order });
-
-    // Optional: store for debugging
-    // order.paymentMeta = { iframeUrl, startedAt: new Date().toISOString() };
-    // await order.save();
-
     return res.json({ iframeUrl });
   } catch (err) {
     console.error("PAYMENT START ERROR:", err);
     return res.status(500).json({ message: "server error" });
   }
 });
+
 function returnHtml({ ok, orderId, clientUrl }) {
   const target = ok
     ? `${clientUrl}/payment-success?orderId=${encodeURIComponent(orderId || "")}`
@@ -119,24 +117,20 @@ function returnHtml({ ok, orderId, clientUrl }) {
     (function () {
       var url = ${JSON.stringify(target)};
 
-      // If it opened as a popup window, redirect opener
       try {
         if (window.opener && !window.opener.closed) {
           window.opener.location.href = url;
         }
       } catch(e) {}
 
-      // If inside iframe, redirect the top page
       try {
         if (window.top && window.top !== window) {
           window.top.location.href = url;
         }
       } catch(e) {}
 
-      // Always redirect this window too (fallback)
       try { window.location.href = url; } catch(e) {}
 
-      // Try closing popup (works if the window was opened by JS)
       setTimeout(function () {
         try { window.close(); } catch(e) {}
       }, 400);
@@ -145,48 +139,19 @@ function returnHtml({ ok, orderId, clientUrl }) {
 </body>
 </html>`;
 }
-/**
- * RETURN SUCCESS (browser redirect from Tranzila)
- * Tranzila may send query or body. We accept both.
- * We redirect to FRONTEND /payment-success?orderId=...
- */
-// router.all("/return/success", urlencoded, async (req, res) => {
-//   const payload = { ...(req.query || {}), ...(req.body || {}) };
-//   const orderId =
-//     payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
 
-//   const to = new URL(`${CLIENT_URL}/payment-success`);
-//   if (orderId) to.searchParams.set("orderId", String(orderId));
-
-//   console.log("🔁 [Return SUCCESS] →", to.toString(), "payload:", payload);
-//   return res.redirect(302, to.toString());
-// });
-
-// /**
-//  * RETURN FAIL (browser redirect from Tranzila)
-//  * redirect to FRONTEND /payment-failed?orderId=...
-//  */
-// router.all("/return/fail", urlencoded, async (req, res) => {
-//   const payload = { ...(req.query || {}), ...(req.body || {}) };
-//   const orderId =
-//     payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
-
-//   const to = new URL(`${CLIENT_URL}/payment-failed`);
-//   if (orderId) to.searchParams.set("orderId", String(orderId));
-
-//   console.log("🔁 [Return FAIL] →", to.toString(), "payload:", payload);
-//   return res.redirect(302, to.toString());
-// });
 router.all("/return/success", urlencoded, async (req, res) => {
   const payload = { ...(req.query || {}), ...(req.body || {}) };
   const orderId = payload.orderid || payload.myorder || payload.orderId || "";
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  return res.status(200).send(returnHtml({
-    ok: true,
-    orderId,
-    clientUrl: CLIENT_URL, // https://www.perfectwrap2021.com
-  }));
+  return res.status(200).send(
+    returnHtml({
+      ok: true,
+      orderId,
+      clientUrl: CLIENT_URL,
+    })
+  );
 });
 
 router.all("/return/fail", urlencoded, async (req, res) => {
@@ -194,17 +159,17 @@ router.all("/return/fail", urlencoded, async (req, res) => {
   const orderId = payload.orderid || payload.myorder || payload.orderId || "";
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
-  return res.status(200).send(returnHtml({
-    ok: false,
-    orderId,
-    clientUrl: CLIENT_URL,
-  }));
+  return res.status(200).send(
+    returnHtml({
+      ok: false,
+      orderId,
+      clientUrl: CLIENT_URL,
+    })
+  );
 });
 
 /**
  * IPN (server-to-server notify from Tranzila)
- * Very important: must respond quickly with 200 OK.
- * We update order paid/failed and reduce stock ONCE (idempotent).
  */
 router.all("/ipn/tranzila", urlencoded, async (req, res) => {
   try {
@@ -213,7 +178,6 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
     const orderId =
       payload.orderid || payload.myorder || payload.orderId || payload.OrderId;
 
-    // Tranzila "Response" often: "000" or "0" = approved
     const Response = payload.Response || payload.response || payload.RESPONSE;
     const approved =
       String(Response || "").trim() === "000" || String(Response || "").trim() === "0";
@@ -226,10 +190,8 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
     const order = await Order.findById(orderId).exec();
     if (!order) return res.status(200).send("OK");
 
-    // ✅ Idempotency: if already paid, don't reduce stock again
     if (order.status === "paid") return res.status(200).send("OK");
 
-    // Save raw payload for debugging (optional field in schema)
     order.tranzilaPayload = payload;
 
     if (!approved) {
@@ -238,12 +200,11 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
       return res.status(200).send("OK");
     }
 
-    // SUCCESS
     order.status = "paid";
 
     // Reduce stock
     for (const item of order.items) {
-      const productId = item.product; // in your schema it's item.product (ObjectId)
+      const productId = item.product;
       const product = await Product.findById(productId).exec();
       if (!product) continue;
 
@@ -258,7 +219,7 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
       await product.save();
     }
 
-    // OPTIONAL: clear cart after payment (recommended)
+    // clear cart after payment
     const user = await User.findById(order.user).exec();
     if (user) {
       user.cart = [];
@@ -269,7 +230,7 @@ router.all("/ipn/tranzila", urlencoded, async (req, res) => {
     return res.status(200).send("OK");
   } catch (err) {
     console.error("❌ [IPN] error:", err);
-    return res.status(200).send("OK"); // always 200 so Tranzila doesn't retry forever
+    return res.status(200).send("OK");
   }
 });
 

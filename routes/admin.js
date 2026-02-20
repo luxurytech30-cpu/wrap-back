@@ -17,13 +17,11 @@ router.use(auth, admin);
 // 2.1 Categories
 //
 
-// GET /api/admin/categories
 router.get("/categories", async (req, res) => {
   const categories = await Category.find().sort({ createdAt: -1 });
   res.json(categories);
 });
 
-// POST /api/admin/categories
 router.post("/categories", async (req, res) => {
   try {
     const { name } = req.body;
@@ -37,7 +35,6 @@ router.post("/categories", async (req, res) => {
   }
 });
 
-// PATCH /api/admin/categories/:id
 router.patch("/categories/:id", async (req, res) => {
   try {
     const { name } = req.body;
@@ -54,7 +51,6 @@ router.patch("/categories/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/admin/categories/:id
 router.delete("/categories/:id", async (req, res) => {
   try {
     const cat = await Category.findByIdAndDelete(req.params.id);
@@ -70,25 +66,16 @@ router.delete("/categories/:id", async (req, res) => {
 // 2.2 Products
 //
 
-// GET /api/admin/products  (with populated category so it matches your TS type)
 router.get("/products", async (req, res) => {
   const products = await Product.find()
-    .populate("category") // Category object
+    .populate("category")
     .sort({ createdAt: -1 });
   res.json(products);
 });
 
-// POST /api/admin/products
 router.post("/products", async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      categoryId, // string
-      image,
-      isTop,
-      options, // [{ optionName, priceWithoutMaam, salePriceWithoutMaam?, stock }]
-    } = req.body;
+    const { name, description, categoryId, image, isTop, options } = req.body;
 
     const product = await Product.create({
       name,
@@ -107,17 +94,9 @@ router.post("/products", async (req, res) => {
   }
 });
 
-// PATCH /api/admin/products/:id
 router.patch("/products/:id", async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      categoryId,
-      image,
-      isTop,
-      options,
-    } = req.body;
+    const { name, description, categoryId, image, isTop, options } = req.body;
 
     const updated = await Product.findByIdAndUpdate(
       req.params.id,
@@ -143,7 +122,6 @@ router.patch("/products/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/admin/products/:id
 router.delete("/products/:id", async (req, res) => {
   try {
     const deleted = await Product.findByIdAndDelete(req.params.id);
@@ -158,13 +136,11 @@ router.delete("/products/:id", async (req, res) => {
 });
 
 //
-// 2.3 Users (show & change role)
+// 2.3 Users
 //
 
-// GET /api/admin/users
 router.get("/users", async (req, res) => {
   const users = await User.find().sort({ createdAt: -1 });
-  // map to your TS User: { id, username, role }
   const mapped = users.map((u) => ({
     id: u._id.toString(),
     username: u.username,
@@ -173,7 +149,6 @@ router.get("/users", async (req, res) => {
   res.json(mapped);
 });
 
-// PATCH /api/admin/users/:id/role
 router.patch("/users/:id/role", async (req, res) => {
   try {
     const { role } = req.body;
@@ -202,6 +177,7 @@ router.patch("/users/:id/role", async (req, res) => {
 
 //
 // 2.4 Orders (all orders)
+// ✅ UPDATED: include deliveryMethod + shippingFee + totalToPay
 //
 
 router.get("/orders", async (req, res) => {
@@ -210,28 +186,47 @@ router.get("/orders", async (req, res) => {
       status: { $nin: ["failed"] },
     }).sort({ createdAt: -1 });
 
-    const mapped = orders.map((o) => ({
-      id: o._id.toString(),
-      date: o.createdAt.toISOString(),
-      items: o.items.map((it) => ({
-        productId: it.product.toString(),
-        productName: it.productName,
-        optionName: it.optionName,
-        optionIndex: it.optionIndex,
-        priceWithoutMaam: it.priceWithoutMaam,
-        quantity: it.quantity,
-        image: it.image,
-        itemNote: it.itemNote,
+    const mapped = orders.map((o) => {
+      const deliveryMethod = o.customerDetails?.deliveryMethod || "pickup";
+      const shippingFee =
+        typeof o.shippingFee === "number"
+          ? o.shippingFee
+          : Number(o.customerDetails?.shippingFee || 0);
 
-        // ✅ ADD THESE:
-        itemImageUrl: it.itemImageUrl || "",
-        itemImagePublicId: it.itemImagePublicId || "",
-      })),
-      totalWithoutMaam: o.totalWithoutMaam,
-      totalWithMaam: o.totalWithMaam,
-      status: o.status,
-      customerDetails: o.customerDetails || undefined,
-    }));
+      const totalToPay =
+        typeof o.totalToPay === "number"
+          ? o.totalToPay
+          : Number(o.totalWithoutMaam || 0) + Number(shippingFee || 0);
+
+      return {
+        id: o._id.toString(),
+        date: o.createdAt.toISOString(),
+        items: o.items.map((it) => ({
+          productId: it.product.toString(),
+          productName: it.productName,
+          optionName: it.optionName,
+          optionIndex: it.optionIndex,
+          priceWithoutMaam: it.priceWithoutMaam,
+          quantity: it.quantity,
+          image: it.image,
+          itemNote: it.itemNote,
+
+          itemImageUrl: it.itemImageUrl || "",
+          itemImagePublicId: it.itemImagePublicId || "",
+        })),
+
+        // existing
+        totalWithoutMaam: o.totalWithoutMaam,
+
+        // ✅ NEW fields
+        deliveryMethod,
+        shippingFee,
+        totalToPay,
+
+        status: o.status,
+        customerDetails: o.customerDetails || undefined,
+      };
+    });
 
     return res.json(mapped);
   } catch (err) {
@@ -239,7 +234,5 @@ router.get("/orders", async (req, res) => {
     return res.status(500).json({ message: "Failed to load orders" });
   }
 });
-
-
 
 module.exports = router;

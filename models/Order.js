@@ -14,11 +14,10 @@ const orderItemSchema = new mongoose.Schema(
     priceWithoutMaam: { type: Number, required: true },
     quantity: { type: Number, required: true },
     image: { type: String },
-    itemNote: { type: String, default: "" }, // ✅ NEW
-        itemImageUrl: { type: String, default: "" },
+
+    itemNote: { type: String, default: "" },
+    itemImageUrl: { type: String, default: "" },
     itemImagePublicId: { type: String, default: "" },
-
-
   },
   { _id: false }
 );
@@ -27,12 +26,23 @@ const customerDetailsSchema = new mongoose.Schema(
   {
     fullName: { type: String, required: true },
     phone: { type: String, required: true },
-    email: { type: String },
-    city: { type: String, required: true },
-    street: { type: String, required: true },
-    houseNumber: { type: String, required: true },
-    postalCode: { type: String },
-    notes: { type: String },
+    email: { type: String, default: "" },
+
+    // ✅ address is NOT required here (pickup exists)
+    city: { type: String, default: "" },
+    street: { type: String, default: "" },
+    houseNumber: { type: String, default: "" },
+    postalCode: { type: String, default: "" },
+
+    notes: { type: String, default: "" },
+
+    // ✅ NEW
+    deliveryMethod: {
+      type: String,
+      enum: ["pickup", "shipping"],
+      default: "pickup",
+    },
+    shippingFee: { type: Number, default: 0 },
   },
   { _id: false }
 );
@@ -55,8 +65,12 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
 
+    // items only
     totalWithoutMaam: { type: Number, required: true },
-    
+
+    // ✅ NEW: charge total and shipping
+    shippingFee: { type: Number, default: 0 },
+    totalToPay: { type: Number, default: 0 },
 
     status: {
       type: String,
@@ -65,10 +79,9 @@ const orderSchema = new mongoose.Schema(
     },
 
     failedAt: { type: Date },
+    tranzilaPayload: { type: Object }, // you already use it in payments.js
   },
-  {
-    timestamps: true, // createdAt, updatedAt
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("Order", orderSchema);
