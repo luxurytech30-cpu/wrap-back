@@ -28,6 +28,24 @@ router.post("/signature/cart", auth, (req, res) => {
   });
 });
 
+router.post("/signature", auth, (req, res) => {
+  const timestamp = Math.round(Date.now() / 1000);
+  const folder = "perfect rab"; 
 
+  const paramsToSign = { timestamp, folder };
+
+  const signature = cloudinary.utils.api_sign_request(
+    paramsToSign,
+    process.env.CLOUDINARY_API_SECRET
+  );
+
+  res.json({
+    timestamp,
+    signature,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    folder,
+  });
+});
 
 module.exports = router;

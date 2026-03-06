@@ -216,10 +216,10 @@ router.patch("/:id/cancel", auth, async (req, res) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    if (order.status !== "pending") {
+    if (order.status !== "paid") {
       return res
         .status(400)
-        .json({ message: "Only pending orders can be canceled" });
+        .json({ message: "Only paid orders can be canceled" });
     }
 
     const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
@@ -247,7 +247,7 @@ router.get("/my", auth, async (req, res) => {
   try {
     const orders = await Order.find({
       user: req.userId,
-      status: { $nin: ["failed"] },
+      status: { $nin: ["failed","pending"] },
     })
       .sort({ createdAt: -1 })
       .exec();

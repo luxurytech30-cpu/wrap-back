@@ -183,7 +183,7 @@ router.patch("/users/:id/role", async (req, res) => {
 router.get("/orders", async (req, res) => {
   try {
     const orders = await Order.find({
-      status: { $nin: ["failed"] },
+      status: { $nin: ["failed","pending"] },
     }).sort({ createdAt: -1 });
 
     const mapped = orders.map((o) => {
